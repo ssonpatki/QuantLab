@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: quantlab, POSTGRES_PASSWORD: quantlab, POSTGRES_DB: postgres }
+    volumes: [pgdata:/var/lib/postgresql/data, ./infra/init-db.sql:/docker-entrypoint-initdb.d/init.sql]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U quantlab"], interval: 3s, retries: 20 }
+
+  market-data:
+    build: ./services/market_data
+    environment: { DATABASE_URL: "postgresql://quantlab:quantlab@postgres:5432/market" }
+    depends_on: { postgres: { condition: service_healthy } }
+
+  backtest:
+    build: ./services/backtest
+    environment:
+      DATABASE_URL: "postgresql://quantlab:quantlab@postgres:5432/backtest"
+      MARKET_URL: "http://market-data:8000"
+    depends_on: { postgres: { condition: service_healthy }, market-data: { condition: service_started } }
+
+  ml:
+    build: ./services/ml
+    environment: { MARKET_URL: "http://market-data:8000" }
+    depends_on: [market-data]
+
+  gateway:
+    build: ./services/gateway
+    environment: { MARKET_URL: "http://market-data:8000", BACKTEST_URL: "http://backtest:8000", ML_URL: "http://ml:8000" }
+    ports: ["8000:8000"]
+    depends_on: [market-data, backtest, ml]
+
+  frontend:
+    build: ./frontend
+    ports: ["3000:80"]
+    depends_on: [gateway]
+
+volumes: { pgdata: {} }
